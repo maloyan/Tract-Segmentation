@@ -1,0 +1,30 @@
+project: tract_segmentation
+kaggle_dir: /kaggle
+input_dir: /kaggle/input
+output_dir: /kaggle/working
+
+input_data_dir: /kaggle/input/uw-madison-gi-tract-image-segmentation
+input_data_npy_dir: /kaggle/input/uw-madison-gi-tract-image-segmentation-masks
+
+spatial_size: [192, 192, 192] #[128, 128, 128]
+n_splits: 5
+random_seed: 2022
+val_fold: 0
+batch_size: 1
+num_workers: 4
+optimizer: "Adam"
+learning_rate: 2e-3
+weight_decay: 1e-6
+scheduler: null
+min_lr: 1e-6
+
+fast_dev_run: False  # Debug training
+gpus: 5
+max_epochs: 30
+precision: 16
+
+device: "cuda"
+accelerator: "gpu"
+thr: 0.45
+
+debug: False  # Debug complete pipeline

@@ -1,0 +1,2 @@
+pytorch-lightning==1.6.4
+monai==0.8.1
