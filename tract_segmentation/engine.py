@@ -1,35 +1,9 @@
-import copy
-import gc
-import os
-import random
-import shutil
-import time
-from collections import defaultdict
-from glob import glob
-
-import albumentations as A
-import cv2
-import joblib
-import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
-import rasterio
 import segmentation_models_pytorch as smp
-import timm
 import torch
 import torch.nn as nn
-import torch.optim as optim
-import wandb
-from albumentations.pytorch import ToTensorV2
-from colorama import Back, Fore, Style
-from IPython import display as ipd
-from joblib import Parallel, delayed
-from matplotlib.patches import Rectangle
-from sklearn.model_selection import (KFold, StratifiedGroupKFold,
-                                     StratifiedKFold)
+
 from torch.cuda import amp
-from torch.optim import lr_scheduler
-from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
 from tract_segmentation.config import CFG
@@ -86,7 +60,6 @@ def train_one_epoch(model, optimizer, scheduler, dataloader, device, epoch):
             gpu_mem=f"{mem:0.2f} GB",
         )
     torch.cuda.empty_cache()
-    gc.collect()
 
     return epoch_loss
 
@@ -127,6 +100,5 @@ def valid_one_epoch(model, dataloader, device, epoch):
         )
     val_scores = np.mean(val_scores, axis=0)
     torch.cuda.empty_cache()
-    gc.collect()
 
     return epoch_loss, val_scores, images, masks, y_pred

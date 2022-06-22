@@ -3,7 +3,7 @@ class CFG:
     debug = False  # set debug=False for Full Training
     exp_name = "Baselinev2"
     model_name = "Unet++"
-    backbone = "efficientnet-b5"
+    backbone = "efficientnet-b6"
     img_size = [384, 384]
     comment = f"{model_name}-{backbone}-{img_size[0]}x{img_size[1]}"
     train_bs = 32
@@ -26,4 +26,4 @@ class CFG:
         1:'large_bowel', 2:'small_bowel', 3:'stomach'
     }
     threshold = 0.45
-    checkpoints = f'/root/tract_segmentation/checkpoints/{comment}'
+    checkpoints = f'/kaggle/input/tract-segmentation-models//{comment}'

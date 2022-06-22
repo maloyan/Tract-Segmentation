@@ -1,42 +1,26 @@
 import copy
-import gc
-import os
-import random
-import shutil
+from glob import glob
 import time
 from collections import defaultdict
-from glob import glob
 
 import albumentations as A
 import cv2
-import joblib
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import rasterio
 import segmentation_models_pytorch as smp
-import timm
 import torch
-import torch.nn as nn
 import torch.optim as optim
 import wandb
-from albumentations.pytorch import ToTensorV2
-from colorama import Back, Fore, Style
-from IPython import display as ipd
-from joblib import Parallel, delayed
-from matplotlib.patches import Rectangle
-from sklearn.model_selection import (KFold, StratifiedGroupKFold,
-                                     StratifiedKFold)
+from sklearn.model_selection import StratifiedGroupKFold
 from torch.cuda import amp
 from torch.optim import lr_scheduler
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from tract_segmentation.config import CFG
 from tract_segmentation.dataset import BuildDataset
 from tract_segmentation.engine import train_one_epoch, valid_one_epoch
-from tract_segmentation.metrics import dice_coef, iou_coef
-from tract_segmentation.utils import set_seed
+from tract_segmentation.utils import path2info, set_seed
 
 set_seed(CFG.seed)
 run = wandb.init(
@@ -48,10 +32,19 @@ run = wandb.init(
 
 BASE_PATH = "/kaggle/input/uw-madison-gi-tract-image-segmentation"
 
+# paths = glob(
+#     f"/kaggle/input/uw-madison-gi-tract-image-segmentation/train/**/*png",
+#     recursive=True,
+# )
+# path_df = pd.DataFrame(paths, columns=["image_path"])
+# path_df = path_df.apply(lambda x: path2info(x), axis=1)
+
+# import IPython; IPython.embed(); exit(1)
 df = pd.read_csv(CFG.data_path)
 df["segmentation"] = df.segmentation.fillna("")
 df["rle_len"] = df.segmentation.map(len)  # length of each rle mask
 df["mask_path"] = df.mask_path.str.replace("/png/", "/np").str.replace(".png", ".npy")
+
 
 df2 = (
     df.groupby(["id"])["segmentation"].agg(list).to_frame().reset_index()
@@ -111,6 +104,15 @@ data_transforms = {
 
 
 train_df = df.query("fold!=0").reset_index(drop=True)
+
+train_non_empty = train_df[train_df["empty"] == False].reset_index(drop=True)
+train_empty = (
+    train_df[train_df["empty"] == True]
+    .sample(int(train_non_empty.shape[0] * 0.66))
+    .reset_index(drop=True)
+)
+train_df = pd.concat([train_non_empty, train_empty], axis=0)
+
 valid_df = df.query("fold==0").reset_index(drop=True)
 
 train_dataset = BuildDataset(train_df, transforms=data_transforms["train"])
@@ -172,7 +174,6 @@ best_epoch = -1
 history = defaultdict(list)
 
 for epoch in range(1, CFG.epochs + 1):
-    gc.collect()
     print(f"Epoch {epoch}/{CFG.epochs}", end="")
     train_loss = train_one_epoch(
         model,
@@ -193,10 +194,10 @@ for epoch in range(1, CFG.epochs + 1):
     history["Valid Dice"].append(val_dice)
     history["Valid Jaccard"].append(val_jaccard)
 
-    # Log the metrics
     rand_img = np.random.randint(pred_mask.shape[0])
     res = torch.zeros(pred_mask[rand_img].shape[1:])
-    true = torch.zeros(pred_mask[rand_img].shape[1:])
+    true = torch.zeros(true_mask[rand_img].shape[1:])
+
     for ind, i in enumerate(pred_mask[rand_img].detach().cpu().numpy()):
         res += (ind + 1) * (i > CFG.threshold)
 
@@ -209,10 +210,19 @@ for epoch in range(1, CFG.epochs + 1):
             "Valid Dice": val_dice,
             "Valid Jaccard": val_jaccard,
             "LR": optimizer.param_groups[0]["lr"],
-            "Image": wandb.Image(bg_img[rand_img], masks={
-                "prediction": {"mask_data": res.numpy(), "class_labels": CFG.labels},
-                "ground truth": {"mask_data": true.numpy(), "class_labels": CFG.labels}
-            })
+            "Image": wandb.Image(
+                bg_img[rand_img],
+                masks={
+                    "prediction": {
+                        "mask_data": res.numpy(),
+                        "class_labels": CFG.labels,
+                    },
+                    "ground truth": {
+                        "mask_data": true.numpy(),
+                        "class_labels": CFG.labels,
+                    },
+                },
+            ),
         }
     )
 
