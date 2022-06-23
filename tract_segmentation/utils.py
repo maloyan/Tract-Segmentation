@@ -1,197 +1,111 @@
-import copy
-import gc
-import os
-import random
-import shutil
-import time
-from collections import defaultdict
-from glob import glob
+from pathlib import Path
+from typing import Callable
+from typing import List
+from typing import Optional
+from typing import Tuple
 
-import albumentations as A
 import cupy as cp
 import cv2
-import joblib
 import matplotlib.pyplot as plt
+import monai
 import numpy as np
 import pandas as pd
-import rasterio
-import segmentation_models_pytorch as smp
-import timm
+import pytorch_lightning as pl
+import seaborn as sns
 import torch
-import torch.nn as nn
-import torch.optim as optim
-import wandb
-from albumentations.pytorch import ToTensorV2
-from colorama import Back, Fore, Style
-from IPython import display as ipd
-from joblib import Parallel, delayed
-from matplotlib.patches import Rectangle
-from sklearn.model_selection import (KFold, StratifiedGroupKFold,
-                                     StratifiedKFold)
-from torch.cuda import amp
-from torch.optim import lr_scheduler
-from torch.utils.data import DataLoader, Dataset
+from joblib import delayed
+from joblib import Parallel
+from monai.data import CSVDataset
+from monai.data import DataLoader
+from pytorch_lightning.callbacks import ModelCheckpoint
+from torchmetrics import Metric
+from torchmetrics import MetricCollection
+from torch.utils.data import DataLoader
 from tqdm import tqdm
+from tqdm.auto import tqdm
+
+from tract_segmentation.config import CFG
+
+def add_3d_paths(df, stage):
+    df["image_3d"] = df["image_path"].str.split("/scans").str[0] + "_image_3d.npy"
+    df["image_3d"] = df["image_3d"].str.replace("input", "working")
+    
+    if stage == "train":
+        df["mask_3d"] = df["image_3d"].str.replace("_image_", "_mask_")
+        
+    return df
+
+def load_image(path):
+    image = cv2.imread(path, cv2.IMREAD_UNCHANGED) # uint16
+    return image
 
 
-def set_seed(seed=42):
-    """Sets the seed of the entire notebook so results are the same every time we run.
-    This is for REPRODUCIBILITY."""
-    np.random.seed(seed)
-    random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    # When running on the CuDNN backend, two further options must be set
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-    # Set a fixed value for the hash seed
-    os.environ["PYTHONHASHSEED"] = str(seed)
-    print("> SEEDING DONE")
+def load_mask(row):
+    shape = (row.height, row.width, 3)
+    mask = np.zeros(shape, dtype=np.uint8)
+
+    rles = eval(row.segmentation.replace("nan", "''"))
+    for i, rle in enumerate(rles):
+        if rle:
+            mask[..., i] = rle_decode(rle, shape[:2])
+
+    return mask * 255
 
 
-def load_img(path):
-    img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
-    img = np.tile(img[..., None], [1, 1, 3])  # gray to rgb
-    img = img.astype("float32")  # original is uint16
-    mx = np.max(img)
-    if mx:
-        img /= mx  # scale image to [0, 1]
-    return img
+# ref: https://www.kaggle.com/paulorzp/run-length-encode-and-decode
+def rle_decode(mask_rle, shape):
+    """
+    mask_rle: run-length as string formated (start length)
+    shape: (height,width) of array to return
+    Returns numpy array, 1 - mask, 0 - background
+
+    """
+    s = np.asarray(mask_rle.split(), dtype=int)
+    starts = s[0::2] - 1
+    lengths = s[1::2]
+    ends = starts + lengths
+
+    mask = np.zeros(shape[0] * shape[1], dtype=np.uint8)
+    for lo, hi in zip(starts, ends):
+        mask[lo:hi] = 1
+
+    return mask.reshape(shape)  # Needed to align to RLE direction
 
 
-def load_msk(path):
-    msk = np.load(path)
-    msk = msk.astype("float32")
-    msk /= 255.0
-    return msk
+def create_3d_image_mask(group_df, stage):
+    image_3d, mask_3d = [], []
+    for row in group_df.itertuples():
+        image_3d.append(load_image(row.image_path))  # uint16
+        
+        if stage == "train":
+            mask_3d.append(load_mask(row))  # uint8
+
+    image_3d = np.stack(image_3d, axis=-1)
+
+    dir_3d = Path(row.image_3d).parent
+    dir_3d.mkdir(parents=True, exist_ok=True)
+    np.save(row.image_3d, image_3d)
+
+    if stage == "train":
+        mask_3d = np.stack(mask_3d, axis=-1)
+        np.save(row.mask_3d, mask_3d)
+
+    return group_df.id.to_list()
 
 
-def get_metadata(row):
-    data = row["id"].split("_")
-    case = int(data[0].replace("case", ""))
-    day = int(data[1].replace("day", ""))
-    slice_ = int(data[-1])
-    row["case"] = case
-    row["day"] = day
-    row["slice"] = slice_
-    return row
+def create_3d_npy_data(df, stage):
+    grouped = df.groupby(["case", "day"])
+    ids = Parallel(n_jobs=CFG.NUM_WORKERS)(
+        delayed(create_3d_image_mask)(group_df, stage)
+        for _, group_df in tqdm(grouped, total=len(grouped), desc="Iterating over case-day groups")
+    )
 
+    columns_to_drop = ["id", "slice", "image_path"]
+    if stage == "train":
+        columns_to_drop += ["classes", "segmentation", "rle_len", "empty", "mask_path", "image_paths"]
 
-def path2info(row):
-    path = row["image_path"]
-    data = path.split("/")
-    slice_ = int(data[-1].split("_")[1])
-    case = int(data[-3].split("_")[0].replace("case", ""))
-    day = int(data[-3].split("_")[1].replace("day", ""))
-    width = int(data[-1].split("_")[2])
-    height = int(data[-1].split("_")[3])
-    row["height"] = height
-    row["width"] = width
-    row["case"] = case
-    row["day"] = day
-    row["slice"] = slice_
-    #     row['id'] = f'case{case}_day{day}_slice_{slice_}'
-    return row
+    df = df.drop(columns=columns_to_drop)
+    df = df.drop_duplicates().reset_index(drop=True)
+    df["ids"] = ids
 
-def mask2rle(msk, thr=0.5):
-    '''
-    img: numpy array, 1 - mask, 0 - background
-    Returns run length as string formated
-    '''
-    msk    = cp.array(msk)
-    pixels = msk.flatten()
-    pad    = cp.array([0])
-    pixels = cp.concatenate([pad, pixels, pad])
-    runs   = cp.where(pixels[1:] != pixels[:-1])[0] + 1
-    runs[1::2] -= runs[::2]
-    return ' '.join(str(x) for x in runs)
-
-def masks2rles(msks, ids, heights, widths):
-    pred_strings = []; pred_ids = []; pred_classes = [];
-    for idx in range(msks.shape[0]):
-        height = heights[idx].item()
-        width = widths[idx].item()
-        msk = cv2.resize(msks[idx], 
-                         dsize=(width, height), 
-                         interpolation=cv2.INTER_NEAREST) # back to original shape
-        rle = [None]*3
-        for midx in [0, 1, 2]:
-            rle[midx] = mask2rle(msk[...,midx])
-        pred_strings.extend(rle)
-        pred_ids.extend([ids[idx]]*len(rle))
-        pred_classes.extend(['large_bowel', 'small_bowel', 'stomach'])
-    return pred_strings, pred_ids, pred_classes
-
-
-# def id2mask(id_):
-#     idf = df[df["id"] == id_]
-#     wh = idf[["height", "width"]].iloc[0]
-#     shape = (wh.height, wh.width, 3)
-#     mask = np.zeros(shape, dtype=np.uint8)
-#     for i, class_ in enumerate(["large_bowel", "small_bowel", "stomach"]):
-#         cdf = idf[idf["class"] == class_]
-#         rle = cdf.segmentation.squeeze()
-#         if len(cdf) and not pd.isna(rle):
-#             mask[..., i] = rle_decode(rle, shape[:2])
-#     return mask
-
-
-# def rgb2gray(mask):
-#     pad_mask = np.pad(mask, pad_width=[(0, 0), (0, 0), (1, 0)])
-#     gray_mask = pad_mask.argmax(-1)
-#     return gray_mask
-
-
-# def gray2rgb(mask):
-#     rgb_mask = tf.keras.utils.to_categorical(mask, num_classes=4)
-#     return rgb_mask[..., 1:].astype(mask.dtype)
-
-
-# def show_img(img, mask=None):
-#     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-#     #     img = clahe.apply(img)
-#     #     plt.figure(figsize=(10,10))
-#     plt.imshow(img, cmap="bone")
-
-#     if mask is not None:
-#         # plt.imshow(np.ma.masked_where(mask!=1, mask), alpha=0.5, cmap='autumn')
-#         plt.imshow(mask, alpha=0.5)
-#         handles = [
-#             Rectangle((0, 0), 1, 1, color=_c)
-#             for _c in [(0.667, 0.0, 0.0), (0.0, 0.667, 0.0), (0.0, 0.0, 0.667)]
-#         ]
-#         labels = ["Large Bowel", "Small Bowel", "Stomach"]
-#         plt.legend(handles, labels)
-#     plt.axis("off")
-
-
-# # ref: https://www.kaggle.com/paulorzp/run-length-encode-and-decode
-# def rle_decode(mask_rle, shape):
-#     """
-#     mask_rle: run-length as string formated (start length)
-#     shape: (height,width) of array to return
-#     Returns numpy array, 1 - mask, 0 - background
-
-#     """
-#     s = mask_rle.split()
-#     starts, lengths = [np.asarray(x, dtype=int) for x in (s[0:][::2], s[1:][::2])]
-#     starts -= 1
-#     ends = starts + lengths
-#     img = np.zeros(shape[0] * shape[1], dtype=np.uint8)
-#     for lo, hi in zip(starts, ends):
-#         img[lo:hi] = 1
-#     return img.reshape(shape)  # Needed to align to RLE direction
-
-
-# # ref.: https://www.kaggle.com/stainsby/fast-tested-rle
-# def rle_encode(img):
-#     """
-#     img: numpy array, 1 - mask, 0 - background
-#     Returns run length as string formated
-#     """
-#     pixels = img.flatten()
-#     pixels = np.concatenate([[0], pixels, [0]])
-#     runs = np.where(pixels[1:] != pixels[:-1])[0] + 1
-#     runs[1::2] -= runs[::2]
-#     return " ".join(str(x) for x in runs)
-
+    return df

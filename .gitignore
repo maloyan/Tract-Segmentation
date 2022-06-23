@@ -94,3 +94,4 @@ submission.csv
 submissions
 notebooks
 wandb
+*.csv
