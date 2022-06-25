@@ -26,7 +26,7 @@ class CFG:
     INPUT_DATA_DIR = f"{INPUT_DIR}/uw-madison-gi-tract-image-segmentation"
     INPUT_DATA_NPY_DIR = f"{INPUT_DIR}/uw-madison-gi-tract-image-segmentation-masks"
 
-    SPATIAL_SIZE = (192, 192, 128)
+    SPATIAL_SIZE = (224, 224, 96)
     N_SPLITS = 5
     RANDOM_SEED = 2022
     VAL_FOLD = 0
@@ -41,14 +41,14 @@ class CFG:
     FAST_DEV_RUN = False  # Debug training
     GPUS = 1
     MAX_EPOCHS = 15
-    PRECISION = 16
+    PRECISION = 32
 
     DEVICE = "cuda"
     THR = 0.45
 
     DEBUG = False  # Debug complete pipeline
 
-    LOGS_PATH = "/kaggle/input/tract-segmentation-models/logs"
+    LOGS_PATH = "/kaggle/input/tract-segmentation-models/logs/lightning_logs/version_9/"
 
 class DiceMetric(Metric):
     def __init__(self):
@@ -236,7 +236,7 @@ def masks2rles(masks, ids, height, width):
 @torch.no_grad()
 def infer(model_paths, device, thr):
     data_module = LitDataModule(
-        train_csv_path="train_preprocessed_3d.csv",
+        train_csv_path=None, #"train_preprocessed_3d.csv",
         test_csv_path="test_preprocessed_3d.csv",
         val_fold=0,
         batch_size=1,
@@ -311,8 +311,8 @@ class LitDataModule(pl.LightningDataModule):
         super().__init__()
 
         self.save_hyperparameters()
-
-        self.train_df = pd.read_csv(train_csv_path)
+        if train_csv_path is not None:
+            self.train_df = pd.read_csv(train_csv_path)
 
         if test_csv_path is not None:
             self.test_df = pd.read_csv(test_csv_path)
@@ -356,14 +356,13 @@ class LitDataModule(pl.LightningDataModule):
         return train_transforms, val_transforms, test_transforms
 
     def setup(self, stage: Optional[str] = None):
-        train_df = self.train_df[
-            self.train_df.fold != self.hparams.val_fold
-        ].reset_index(drop=True)
-        val_df = self.train_df[self.train_df.fold == self.hparams.val_fold].reset_index(
-            drop=True
-        )
-
         if stage == "fit" or stage is None:
+            train_df = self.train_df[
+                self.train_df.fold != self.hparams.val_fold
+            ].reset_index(drop=True)
+            val_df = self.train_df[self.train_df.fold == self.hparams.val_fold].reset_index(
+                drop=True
+            )
             self.train_dataset = self._dataset(
                 train_df, transforms=self.train_transforms
             )
@@ -422,13 +421,12 @@ class LitModule(pl.LightningModule):
         self.metrics = self._init_metrics()
 
     def _init_model(self):
-        return monai.networks.nets.UNet(
-            spatial_dims=3,
+        return monai.networks.nets.SwinUNETR(
             in_channels=1,
             out_channels=3,
-            channels=(16, 32, 64, 128, 256),
-            strides=(2, 2, 2, 2),
-            num_res_units=2,
+            img_size=CFG.SPATIAL_SIZE,
+            feature_size=48,
+            use_checkpoint=True,
         )
 
     def _init_loss_fn(self):

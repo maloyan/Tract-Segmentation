@@ -39,6 +39,7 @@ def train(
     max_epochs: int = CFG.MAX_EPOCHS,
     precision: int = CFG.PRECISION,
     debug: bool = CFG.DEBUG,
+    checkpoint: str = None
 ):
     pl.seed_everything(random_seed)
 
@@ -53,14 +54,19 @@ def train(
         num_workers=num_workers,
     )
 
-    module = LitModule(
-        learning_rate=learning_rate,
-        weight_decay=weight_decay,
-        scheduler=scheduler,
-        T_max=int(30_000 / batch_size * max_epochs) + 50,
-        T_0=25,
-        min_lr=min_lr,
-    )
+    if checkpoint:
+        print("Loading from checkpoint")
+        module = LitModule.load_from_checkpoint(checkpoint)
+    else:
+        module = LitModule(
+            learning_rate=learning_rate,
+            weight_decay=weight_decay,
+            scheduler=scheduler,
+            T_max=int(30_000 / batch_size * max_epochs) + 50,
+            T_0=25,
+            min_lr=min_lr,
+        )
+
 
     trainer = pl.Trainer(
         fast_dev_run=fast_dev_run,
@@ -112,7 +118,9 @@ batch = next(iter(train_dataloader))
 
 
 
-trainer = train()
+trainer = train(
+    #checkpoint="/kaggle/input/tract-segmentation-models/logs/lightning_logs/version_10/checkpoints/epoch=12-step=2691.ckpt"
+)
 
 # From https://www.kaggle.com/code/jirkaborovec?scriptVersionId=93358967&cellId=22
 metrics = pd.read_csv(f"{trainer.logger.log_dir}/metrics.csv")[["epoch", "train_loss_epoch", "val_loss"]]

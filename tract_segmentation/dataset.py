@@ -49,6 +49,7 @@ class LitDataModule(pl.LightningDataModule):
             monai.transforms.AddChanneld(keys=["image_3d"]),
             monai.transforms.AsChannelFirstd(keys=["mask_3d"], channel_dim=2),
             monai.transforms.ScaleIntensityd(keys=["image_3d", "mask_3d"]),
+            monai.transforms.RandSpatialCropd(keys=["image_3d", "mask_3d"], roi_size=spatial_size, random_size=False),
             #monai.transforms.ResizeWithPadOrCrop(keys=["image_3d", "mask_3d"], spatial_size=spatial_size),
             monai.transforms.Resized(keys=["image_3d", "mask_3d"], spatial_size=spatial_size, mode="nearest"),
         ]
@@ -57,6 +58,7 @@ class LitDataModule(pl.LightningDataModule):
             monai.transforms.LoadImaged(keys=["image_3d"]),
             monai.transforms.AddChanneld(keys=["image_3d"]),
             monai.transforms.ScaleIntensityd(keys=["image_3d"]),
+            monai.transforms.RandSpatialCropd(keys=["image_3d"], roi_size=spatial_size, random_size=False),
             #monai.transforms.ResizeWithPadOrCrop(keys=["image_3d"], spatial_size=spatial_size),
             monai.transforms.Resized(keys=["image_3d"], spatial_size=spatial_size, mode="nearest"),
         ]
