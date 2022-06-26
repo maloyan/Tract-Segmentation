@@ -32,7 +32,7 @@ cfg.warmup = 1
 cfg.mixed_precision = True
 cfg.gpu = 0
 cfg.device = "cuda:%d" % cfg.gpu
-cfg.num_workers = 4
+cfg.num_workers = 0
 cfg.weights = None
 
 basic_cfg = cfg

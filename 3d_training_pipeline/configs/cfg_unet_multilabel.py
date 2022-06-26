@@ -1,37 +1,36 @@
 import numpy as np
 import torch
 from monai.transforms import (
-    Compose,
-    LoadImaged,
-    RandSpatialCropd,
-    EnsureTyped,
-    CastToTyped,
-    NormalizeIntensityd,
-    RandFlipd,
-    CenterSpatialCropd,
-    ScaleIntensityRanged,
-    RandAffined,
-    RandScaleIntensityd,
-    RandShiftIntensityd,
-    RandCoarseDropoutd,
-    Rand2DElasticd,
-    Lambdad,
-    Resized,
     AddChanneld,
+    CastToTyped,
+    CenterSpatialCropd,
+    Compose,
+    CropForegroundd,
+    EnsureChannelFirstd,
+    EnsureTyped,
+    FgBgToIndicesd,
+    Lambdad,
+    LoadImaged,
+    NormalizeIntensityd,
+    OneOf,
+    Rand2DElasticd,
+    RandAffined,
+    RandCoarseDropoutd,
+    RandCropByPosNegLabeld,
+    RandFlipd,
     RandGaussianNoised,
     RandGridDistortiond,
-    RepeatChanneld,
-    Transposed,
-    OneOf,
-    EnsureChannelFirstd,
     RandLambdad,
+    RandScaleIntensityd,
+    RandShiftIntensityd,
+    RandSpatialCropd,
+    RepeatChanneld,
+    Resized,
+    ScaleIntensityRanged,
     Spacingd,
-    FgBgToIndicesd,
-    CropForegroundd,
-    RandCropByPosNegLabeld,
-    ToDeviced,
     SpatialPadd,
-
+    ToDeviced,
+    Transposed,
 )
 
 from default_config import basic_cfg
@@ -60,23 +59,23 @@ cfg.restart_epoch = 100  # only for warmup_restart
 cfg.finetune_lb = -1
 
 # dataset
-cfg.img_size = (224, 224, 80)
+cfg.img_size = (224, 224, 96)
 cfg.spacing = (1.5, 1.5, 1.5)
-cfg.batch_size = 4
+cfg.batch_size = 1
 cfg.val_batch_size = 1
 cfg.train_cache_rate = 0.0
 cfg.val_cache_rate = 1.0
 cfg.gpu_cache = False
 cfg.val_gpu_cache = False
-
+cfg.device_ids = [0]
 # val
-cfg.roi_size = (224, 224, 80)
+cfg.roi_size = (224, 224, 96) #(224, 224, 96)
 cfg.sw_batch_size = 4
 
 # model
 
 cfg.output_dir = "./checkpoints/unet_3d_multilabel_large_net"
-        
+
 # transforms
 cfg.train_transforms = Compose(
     [
@@ -120,14 +119,20 @@ cfg.train_transforms = Compose(
             keys=("image", "mask"),
             prob=0.5,
             rotate_range=np.pi / 12,
-            translate_range=(cfg.img_size[0]*0.0625, cfg.img_size[1]*0.0625),
+            translate_range=(cfg.img_size[0] * 0.0625, cfg.img_size[1] * 0.0625),
             scale_range=(0.1, 0.1),
             mode="nearest",
             padding_mode="reflection",
         ),
         OneOf(
             [
-                RandGridDistortiond(keys=("image", "mask"), prob=0.5, distort_limit=(-0.05, 0.05), mode="nearest", padding_mode="reflection"),
+                RandGridDistortiond(
+                    keys=("image", "mask"),
+                    prob=0.5,
+                    distort_limit=(-0.05, 0.05),
+                    mode="nearest",
+                    padding_mode="reflection",
+                ),
                 RandCoarseDropoutd(
                     keys=("image", "mask"),
                     holes=5,
@@ -175,5 +180,3 @@ cfg.org_val_transforms = Compose(
         EnsureTyped(keys="image", dtype=torch.float32),
     ]
 )
-
-
