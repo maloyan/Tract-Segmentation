@@ -59,7 +59,7 @@ cfg.restart_epoch = 100  # only for warmup_restart
 cfg.finetune_lb = -1
 
 # dataset
-cfg.img_size = (224, 224, 96)
+cfg.img_size = (192, 192, 64)
 cfg.spacing = (1.5, 1.5, 1.5)
 cfg.batch_size = 1
 cfg.val_batch_size = 1
@@ -69,7 +69,7 @@ cfg.gpu_cache = False
 cfg.val_gpu_cache = False
 cfg.device_ids = [0]
 # val
-cfg.roi_size = (224, 224, 96) #(224, 224, 96)
+cfg.roi_size = (192, 192, 64) #(224, 224, 96)
 cfg.sw_batch_size = 4
 
 # model

@@ -47,7 +47,6 @@ def get_train_dataloader(train_dataset, cfg):
         batch_size=cfg.batch_size,
         num_workers=cfg.num_workers,
         drop_last=True,
-        pin_memory=True
     )
     return train_dataloader
 

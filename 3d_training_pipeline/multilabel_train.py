@@ -72,36 +72,36 @@ val_dataloader = get_val_dataloader(val_dataset, cfg)
 
 print(f"run fold {cfg.fold}, train len: {len(train_dataset)}")
 
-model = UNet(
-    spatial_dims=3,
-    in_channels=1,
-    out_channels=3,
-    channels=(32, 64, 128, 256, 512),
-    strides=(2, 2, 2, 2),
-    kernel_size=3,
-    up_kernel_size=3,
-    num_res_units=2,
-    act="PRELU",
-    norm="BATCH",
-    dropout=0.2,
-    bias=True,
-    dimensions=None,
-) #.to(cfg.device)
-
-# model = SwinUNETR(
+# model = UNet(
+#     spatial_dims=3,
 #     in_channels=1,
 #     out_channels=3,
-#     img_size=cfg.img_size,
-#     feature_size=48,
-#     use_checkpoint=True,
-# )
+#     channels=(32, 64, 128, 256, 512),
+#     strides=(2, 2, 2, 2),
+#     kernel_size=3,
+#     up_kernel_size=3,
+#     num_res_units=2,
+#     act="PRELU",
+#     norm="BATCH",
+#     dropout=0.2,
+#     bias=True,
+#     dimensions=None,
+# ) #.to(cfg.device)
 
-# weight = torch.load(
-#     os.path.join("/root/tract_segmentation/checkpoints/model_swinvit.pt")
-# )
+model = SwinUNETR(
+    in_channels=1,
+    out_channels=3,
+    img_size=cfg.img_size,
+    feature_size=48,
+    use_checkpoint=True,
+)
 
-# model.load_from(weights=weight)
-# model.to(cfg.device)
+weight = torch.load(
+    os.path.join("/root/tract_segmentation/checkpoints/model_swinvit.pt")
+)
+
+model.load_from(weights=weight)
+model.to(cfg.device)
 
 if cfg.weights is not None:
     model.load_state_dict(
